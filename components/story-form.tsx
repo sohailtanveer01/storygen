@@ -19,7 +19,7 @@ export function StoryForm({ onSubmit }: StoryFormProps) {
   const [formData, setFormData] = useState({
     childName: '',
     childAge: '',
-    theme: 'adventure',
+    theme: 'superhero',
   });
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string>('');
@@ -206,12 +206,9 @@ export function StoryForm({ onSubmit }: StoryFormProps) {
                   <SelectValue placeholder="Choose a story theme" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="adventure">🗺️ Magical Adventure</SelectItem>
-                  <SelectItem value="space">🚀 Space Explorer</SelectItem>
-                  <SelectItem value="ocean">🌊 Under the Sea</SelectItem>
-                  <SelectItem value="forest">🌲 Enchanted Forest</SelectItem>
                   <SelectItem value="superhero">🦸 Superhero Journey</SelectItem>
                   <SelectItem value="princess">👑 Royal Adventure</SelectItem>
+                  <SelectItem value="space">🚀 Space Explorer</SelectItem>
                 </SelectContent>
               </Select>
             </div>

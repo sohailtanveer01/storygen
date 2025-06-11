@@ -6,8 +6,64 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const runway = new RunwayML({
-  apiKey: 'key_498211c68c401be03df646fb101d534323fe86745521dae09a866bf5aff00ece7b3ac370c1708cf0d367cdb4ca479674c561a092a3640a2379a85cad2efe149e'
+  apiKey: 'key_804b6411b7b57196c387f7bf0ce1fded5d54b667056e4a667bfec2462b89c853ba75840a463fbd56643aae546d2e7d6bee7b921e78e53c0341f3d46a111b4a52'
 });
+
+// Add delay between retries
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Maximum number of retries
+const MAX_RETRIES = 3;
+const RETRY_DELAY = 2000; // 2 seconds
+
+async function createImageTask(prompt: string, dataUrl: string, retryCount = 0): Promise<any> {
+  try {
+    console.log(`Attempt ${retryCount + 1} to create image task`);
+    const taskResponse = await runway.textToImage.create({
+      model: 'gen4_image',
+      ratio: '1024:1024',
+      promptText: prompt,
+      referenceImages: [{
+        uri: dataUrl,
+        tag: 'child'
+      }]
+    });
+    return taskResponse;
+  } catch (error: any) {
+    if (retryCount < MAX_RETRIES && (error.status === 429 || error.status === 500)) {
+      console.log(`Rate limited or server error, retrying in ${RETRY_DELAY}ms...`);
+      await delay(RETRY_DELAY);
+      return createImageTask(prompt, dataUrl, retryCount + 1);
+    }
+    throw error;
+  }
+}
+
+async function pollTaskStatus(taskId: string, retryCount = 0): Promise<any> {
+  try {
+    const currentTask = await runway.tasks.retrieve(taskId);
+    console.log('Task status:', currentTask.status);
+
+    if (currentTask.status === 'FAILED') {
+      throw new Error('Task failed');
+    }
+
+    if (currentTask.status === 'SUCCEEDED') {
+      return currentTask;
+    }
+
+    // If still processing, wait and retry
+    await delay(1000);
+    return pollTaskStatus(taskId, retryCount + 1);
+  } catch (error: any) {
+    if (retryCount < MAX_RETRIES && (error.status === 429 || error.status === 500)) {
+      console.log(`Rate limited or server error while polling, retrying in ${RETRY_DELAY}ms...`);
+      await delay(RETRY_DELAY);
+      return pollTaskStatus(taskId, retryCount + 1);
+    }
+    throw error;
+  }
+}
 
 export async function POST(request: NextRequest) {
   console.log('Received request to /api/runway');
@@ -63,40 +119,15 @@ export async function POST(request: NextRequest) {
     const dataUrl = `data:${childImage.type};base64,${base64Image}`;
 
     console.log('Creating image generation task...');
+    console.log('Prompt:', prompt);
     
     try {
-      // Create a new image generation task
-      const taskResponse = await runway.textToImage.create({
-        model: 'gen4_image',
-        ratio: '1024:1024',
-        promptText: prompt,
-        referenceImages: [{
-          uri: dataUrl,
-          tag: 'child'
-        }]
-      });
-
+      // Create task with retries
+      const taskResponse = await createImageTask(prompt, dataUrl);
       console.log('Task created:', taskResponse);
 
-      // Get the task ID from the response
-      const taskId = taskResponse.id;
-      let currentTask;
-
-      // Poll for completion
-      do {
-        // Wait for 1 second before polling
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        currentTask = await runway.tasks.retrieve(taskId);
-        console.log('Task status:', currentTask.status);
-      } while (!['SUCCEEDED', 'FAILED'].includes(currentTask.status));
-
-      if (currentTask.status === 'FAILED') {
-        console.error('Task failed:', currentTask);
-        return NextResponse.json(
-          { error: 'Image generation failed' },
-          { status: 500 }
-        );
-      }
+      // Poll for completion with retries
+      const currentTask = await pollTaskStatus(taskResponse.id);
 
       if (!currentTask.output || !currentTask.output[0]) {
         console.error('No output in task:', currentTask);
@@ -120,7 +151,6 @@ export async function POST(request: NextRequest) {
     }
   } catch (error) {
     console.error('Server Error:', error);
-    // Ensure we always return JSON
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Internal server error' },
       { status: 500 }
